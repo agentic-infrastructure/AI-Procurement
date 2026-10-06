@@ -1,0 +1,665 @@
+<title>RFI Tracker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+/* Layout: control-room ledger — summary strip, filter bar, wide scrolling grid, slide-in editor drawer */
+:root{
+  --bg:#f3f5f7; --surface:#ffffff; --surface-2:#eef1f4; --line:#d6dce3; --line-strong:#b9c2cc;
+  --fg:#18212b; --muted:#5b6876; --faint:#8794a1;
+  --accent:#1f5f8b; --accent-ink:#ffffff; --accent-soft:#dfeaf3;
+  --ok:#1d7a4a; --ok-soft:#dcf1e5; --warn:#a15c00; --warn-soft:#fbecd3; --bad:#b3261e; --bad-soft:#f9dedc; --info-soft:#e4e8ff; --info:#3b48a8;
+  --f-display:"IBM Plex Sans Condensed","Arial Narrow",system-ui,sans-serif;
+  --f-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,Consolas,monospace;
+  --r:6px; --shadow:0 10px 30px rgba(16,30,45,.18);
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#11161c; --surface:#18202a; --surface-2:#1f2935; --line:#2c3846; --line-strong:#3d4b5c;
+  --fg:#e3e9ef; --muted:#9aa8b6; --faint:#6f7e8d;
+  --accent:#6fb0de; --accent-ink:#0c1620; --accent-soft:#1d3447;
+  --ok:#5cc58d; --ok-soft:#173526; --warn:#e7a54a; --warn-soft:#3a2a12; --bad:#f08a82; --bad-soft:#3f1b19; --info-soft:#232a52; --info:#a9b2ff;
+  --shadow:0 10px 30px rgba(0,0,0,.5); color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#11161c; --surface:#18202a; --surface-2:#1f2935; --line:#2c3846; --line-strong:#3d4b5c;
+  --fg:#e3e9ef; --muted:#9aa8b6; --faint:#6f7e8d;
+  --accent:#6fb0de; --accent-ink:#0c1620; --accent-soft:#1d3447;
+  --ok:#5cc58d; --ok-soft:#173526; --warn:#e7a54a; --warn-soft:#3a2a12; --bad:#f08a82; --bad-soft:#3f1b19; --info-soft:#232a52; --info:#a9b2ff;
+  --shadow:0 10px 30px rgba(0,0,0,.5); color-scheme:dark}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{background:var(--bg);color:var(--fg);font-family:var(--f-body);font-size:14px;line-height:1.45}
+.app{padding:20px 20px 40px;max-width:1800px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
+h1{font-family:var(--f-display);font-weight:600;font-size:26px;letter-spacing:.01em;margin:0;text-wrap:balance}
+.top{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px}
+.meta{color:var(--muted);font-size:12.5px;margin-top:2px}
+.meta b{font-weight:500;color:var(--fg)}
+.actions{display:flex;flex-wrap:wrap;gap:8px}
+button,.btn{font:inherit;font-size:13px;border:1px solid var(--line-strong);background:var(--surface);color:var(--fg);border-radius:var(--r);padding:7px 12px;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+button:hover{border-color:var(--accent)}
+button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:500}
+button.ghost{border-color:transparent;background:transparent;color:var(--muted);padding:4px 6px}
+button.ghost:hover{color:var(--fg);background:var(--surface-2)}
+button.danger{color:var(--bad)}
+button:disabled{opacity:.5;cursor:not-allowed}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.banner{border:1px solid var(--warn);background:var(--warn-soft);color:var(--fg);padding:8px 12px;border-radius:var(--r);font-size:13px}
+/* summary */
+.summary{display:flex;flex-wrap:wrap;gap:8px}
+.stat{display:flex;flex-direction:column;gap:2px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:8px 12px;min-width:104px;cursor:pointer;text-align:left}
+.stat .n{font-family:var(--f-display);font-size:22px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.1}
+.stat .l{font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.stat.on{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+.stat.alert .n{color:var(--bad)}
+.stat.soon .n{color:var(--warn)}
+.sep{width:1px;background:var(--line);margin:4px 4px}
+/* filters */
+.filters{display:flex;flex-wrap:wrap;gap:8px;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:8px 10px}
+.filters label{font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;display:flex;flex-direction:column;gap:2px}
+select,input[type=text],input[type=date],input[type=email],input[type=tel],input[type=url],textarea{font:inherit;font-size:13px;color:var(--fg);background:var(--surface);border:1px solid var(--line-strong);border-radius:5px;padding:5px 7px;min-width:0}
+textarea{resize:vertical;width:100%}
+.filters input[type=text]{width:200px}
+.chk{flex-direction:row!important;align-items:center;gap:6px!important;text-transform:none!important;letter-spacing:0!important;font-size:13px!important;color:var(--fg)!important;margin-top:14px}
+.count{margin-left:auto;color:var(--muted);font-size:12.5px;font-variant-numeric:tabular-nums}
+/* grid */
+.tablewrap{overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);max-height:calc(100vh - 290px);min-height:320px}
+table{border-collapse:separate;border-spacing:0;width:100%;font-size:13px}
+thead th{position:sticky;top:0;z-index:2;background:var(--surface-2);text-align:left;font-weight:600;font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);padding:8px 10px;border-bottom:1px solid var(--line-strong);white-space:nowrap;vertical-align:bottom}
+thead th.grp{background:var(--accent-soft);color:var(--fg)}
+thead tr.g th{top:0;font-size:11px;padding:4px 10px;border-bottom:1px solid var(--line)}
+thead tr.h th{top:var(--gh,0px)}
+th .ki-h{display:flex;align-items:center;gap:4px;text-transform:none;letter-spacing:0;font-size:12.5px;color:var(--fg);white-space:normal;min-width:120px;max-width:200px}
+th .ki-h input{width:100%;font-size:12.5px;padding:3px 5px}
+tbody td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+tbody tr:hover td{background:color-mix(in srgb,var(--accent-soft) 40%,transparent)}
+td.sticky,th.sticky{position:sticky;left:0;z-index:1;background:var(--surface);min-width:190px;box-shadow:1px 0 0 var(--line)}
+thead th.sticky{z-index:3;background:var(--surface-2)}
+tbody tr:hover td.sticky{background:color-mix(in srgb,var(--accent-soft) 40%,var(--surface))}
+.vname{font-weight:600;color:var(--fg);background:none;border:0;padding:0;text-align:left;cursor:pointer;font-size:13.5px;display:block;max-width:240px}
+.vname:hover{color:var(--accent);text-decoration:underline}
+.mono{font-family:var(--f-mono);font-size:11.5px;color:var(--muted)}
+.typechip{display:inline-block;font-size:11px;color:var(--muted);background:var(--surface-2);border-radius:3px;padding:0 5px;margin-top:2px}
+.contact{min-width:180px;max-width:230px}
+.contact .nm{font-weight:500}
+.contact .sub{color:var(--muted);font-size:12px;word-break:break-all}
+.contact a{color:var(--accent)}
+.unv{font-size:10.5px;color:var(--warn);text-transform:uppercase;letter-spacing:.05em}
+td select,td input[type=date]{font-size:12.5px;padding:3px 5px}
+.pill{display:inline-block;border-radius:999px;padding:1px 8px;font-size:12px;font-weight:500;white-space:nowrap}
+.s-neutral{background:var(--surface-2);color:var(--muted)}
+.s-info{background:var(--info-soft);color:var(--info)}
+.s-ok{background:var(--ok-soft);color:var(--ok)}
+.s-warn{background:var(--warn-soft);color:var(--warn)}
+.s-bad{background:var(--bad-soft);color:var(--bad)}
+.kicell{min-width:120px;max-width:200px;cursor:pointer}
+.kicell .v{display:flex;gap:6px;align-items:flex-start}
+.kicell .t{color:var(--fg);overflow-wrap:anywhere}
+.kicell .t.empty{color:var(--faint)}
+.dot{width:9px;height:9px;border-radius:50%;flex:0 0 9px;margin-top:5px;border:1.5px solid var(--line-strong)}
+.dot.ok{background:var(--ok);border-color:var(--ok)}
+.dot.risk{background:var(--warn);border-color:var(--warn)}
+.dot.fail{background:var(--bad);border-color:var(--bad)}
+.kisum{white-space:nowrap;font-variant-numeric:tabular-nums}
+.kisum .bar{display:inline-flex;gap:2px;vertical-align:middle;margin-right:6px}
+.kisum .bar i{width:7px;height:12px;border-radius:2px;background:var(--line)}
+.kisum .bar i.ok{background:var(--ok)} .kisum .bar i.risk{background:var(--warn)} .kisum .bar i.fail{background:var(--bad)} .kisum .bar i.filled{background:var(--faint)}
+.next{min-width:170px;max-width:260px}
+.due{white-space:nowrap;font-variant-numeric:tabular-nums}
+.due.over{color:var(--bad);font-weight:600}
+.due.soon{color:var(--warn);font-weight:500}
+.empty-state{padding:48px 20px;text-align:center;color:var(--muted)}
+.empty-state h2{font-family:var(--f-display);color:var(--fg);font-size:18px;margin:0 0 6px}
+/* drawer */
+.scrim{position:fixed;inset:0;background:rgba(10,18,26,.35);z-index:20}
+.drawer{position:fixed;top:0;right:0;bottom:0;width:min(560px,100%);background:var(--surface);border-left:1px solid var(--line);box-shadow:var(--shadow);z-index:21;display:flex;flex-direction:column;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+.dhead{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:16px 18px 12px;border-bottom:1px solid var(--line)}
+.dhead h2{font-family:var(--f-display);font-size:20px;margin:0;font-weight:600}
+.dbody{overflow:auto;padding:14px 18px 24px;display:flex;flex-direction:column;gap:18px}
+.dsec h3{font-size:11.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin:0 0 8px;font-weight:600;display:flex;justify-content:space-between;align-items:center}
+.fgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.fgrid .full{grid-column:1/-1}
+.field{display:flex;flex-direction:column;gap:3px;min-width:0}
+.field>span{font-size:12px;color:var(--muted)}
+.field input,.field select{width:100%}
+.kirow{display:grid;grid-template-columns:1fr 132px;gap:8px;padding:8px 0;border-top:1px solid var(--line)}
+.kirow:first-of-type{border-top:0}
+.kirow .lbl{grid-column:1/-1;font-weight:500;font-size:13px}
+.kirow textarea{min-height:34px}
+.kirow.hi{background:var(--accent-soft);margin:0 -8px;padding:8px}
+.dfoot{display:flex;justify-content:space-between;gap:8px;padding:12px 18px;border-top:1px solid var(--line);align-items:center}
+.saved{font-size:12px;color:var(--muted)}
+.src{font-size:12px;color:var(--muted);background:var(--surface-2);border-radius:5px;padding:8px 10px}
+/* key item manager */
+.kmlist{display:flex;flex-direction:column;gap:6px}
+.kmitem{display:grid;grid-template-columns:auto 1fr auto auto auto;gap:6px;align-items:center}
+.kmitem .num{font-family:var(--f-mono);font-size:11.5px;color:var(--faint);width:18px;text-align:right}
+.kmitem input{width:100%}
+.hint{font-size:12px;color:var(--muted)}
+.confirm{display:flex;gap:6px;align-items:center;font-size:12.5px;color:var(--bad)}
+.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--fg);color:var(--bg);padding:8px 14px;border-radius:var(--r);font-size:13px;z-index:40;box-shadow:var(--shadow)}
+.legend{display:flex;flex-wrap:wrap;gap:12px;font-size:12px;color:var(--muted);align-items:center}
+.legend span{display:inline-flex;gap:5px;align-items:center}
+@media (max-width:720px){
+  .app{padding:14px 16px 32px}
+  .filters input[type=text]{width:100%}
+  .filters label{flex:1 1 140px}
+  .fgrid{grid-template-columns:1fr}
+  .tablewrap{max-height:none}
+  .count{margin-left:0}
+}
+@media (prefers-reduced-motion:no-preference){.drawer{animation:slide .18s ease-out}@keyframes slide{from{transform:translateX(24px);opacity:.6}}}
+</style>
+
+<div class="app">
+  <div class="top">
+    <div>
+      <h1>RFI Tracker</h1>
+      <div class="meta">Agentic Procurement · RFI stage of vendor qualification · <b>Internal</b> · Owner: Jason Knedlhans</div>
+    </div>
+    <div class="actions">
+      <button id="btnKeys" type="button" title="Rename, add, reorder or remove key items for the selected vendor type">Key items</button>
+      <button id="btnExport" type="button">Export to Excel</button>
+      <button id="btnAdd" type="button" class="primary">+ Add vendor</button>
+    </div>
+  </div>
+
+  <div id="banner" class="banner" hidden></div>
+
+  <div class="summary" id="summary" aria-label="Status summary"></div>
+
+  <div class="filters">
+    <label>Vendor type<select id="fType"></select></label>
+    <label>RFI status<select id="fRfi"></select></label>
+    <label>Qualification<select id="fQual"></select></label>
+    <label>Action owner<select id="fOwner"></select></label>
+    <label>Search<input type="text" id="fSearch" placeholder="Vendor, contact, action…"></label>
+    <label class="chk"><input type="checkbox" id="fOverdue"> Overdue only</label>
+    <span class="count" id="count"></span>
+  </div>
+
+  <div class="legend" id="legend">
+    <span>Key item rating:</span>
+    <span><i class="dot ok"></i>Meets</span>
+    <span><i class="dot risk"></i>Review / risk</span>
+    <span><i class="dot fail"></i>Fails</span>
+    <span><i class="dot"></i>Not rated</span>
+    <span id="legendHint"></span>
+  </div>
+
+  <div class="tablewrap" id="wrap">
+    <table id="grid"><thead id="thead"></thead><tbody id="tbody"></tbody></table>
+    <div class="empty-state" id="empty" hidden></div>
+  </div>
+</div>
+
+<div class="scrim" id="scrim" hidden></div>
+<aside class="drawer" id="drawer" hidden aria-label="Vendor editor"></aside>
+<aside class="drawer" id="keyPanel" hidden aria-label="Key item manager"></aside>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+(function(){
+"use strict";
+// ---------- reference lists ----------
+const TYPES = ["Env Eng","Civil Eng","Structural Eng","Electrical Eng","Fire Eng","Owners Eng","Eng of Record","Independent Eng","BESS Equipment","MV Transformers","HV Breakers","MV Breakers","EPC","Software"];
+const TYPE_LABEL = {"Env Eng":"Environmental Engineering","Civil Eng":"Civil Engineering","Structural Eng":"Structural Engineering","Electrical Eng":"Electrical Engineering","Fire Eng":"Fire Protection Engineering","Owners Eng":"Owner's Engineer","Eng of Record":"Engineer of Record","Independent Eng":"Independent Engineer","BESS Equipment":"BESS Equipment","MV Transformers":"MV Transformers","HV Breakers":"HV Breakers","MV Breakers":"MV Breakers / Switchgear","EPC":"EPC Contractor","Software":"Software"};
+const RFI = [
+  ["Not Sent","s-neutral"],["Sent","s-info"],["Acknowledged","s-info"],["Clarifications Open","s-warn"],
+  ["Response Received","s-ok"],["Under Review","s-warn"],["Complete","s-ok"],["Declined","s-bad"],["No Response","s-bad"]];
+const RFI_CLOSED = new Set(["Complete","Declined","No Response"]);
+const QUAL = [["Discovery","s-neutral"],["Prequalified","s-info"],["Qualified","s-ok"],["AVL","s-ok"],["On Hold","s-warn"],["Disqualified","s-bad"]];
+const FLAGS = [["","Not rated"],["ok","Meets"],["risk","Review / risk"],["fail","Fails"]];
+const OWNERS = ["Jason Knedlhans","Sam Brandin","Matt Shae","Project Manager","Project Engineer","Vendor"];
+const k = (label)=>({id:"", label});
+const ENG_BASE = ["Relevant BESS / ERCOT project experience","Key personnel & availability","Texas PE / firm registration","Fee basis / rate sheet","Insurance (PL / GL limits)","Schedule capacity & start date","QA/QC process"];
+const DEFAULT_KEYS = {
+  "Env Eng":["Permitting experience (TCEQ, USACE, TPWD)","Relevant BESS / ERCOT project experience","Key personnel & availability","Fee basis / rate sheet","Insurance (PL / GL limits)","Schedule capacity & turnaround","Texas office / field staff"],
+  "Civil Eng":["Relevant BESS / substation site experience","Texas PE / firm registration","Key personnel & availability","Fee basis / rate sheet","Insurance (PL / GL limits)","Schedule capacity & start date","Geotech / survey capability"],
+  "Structural Eng":["BESS enclosure / substation structure experience","Texas PE / firm registration","Key personnel & availability","Fee basis / rate sheet","Insurance (PL / GL limits)","Schedule capacity & start date","Design software & standards (ASCE 7, ACI)"],
+  "Electrical Eng":["345 kV / ERCOT interconnection experience","Texas PE / firm registration","Studies capability (ETAP, PSCAD, PSS/E)","Key personnel & availability","Fee basis / rate sheet","Insurance (PL / GL limits)","Schedule capacity & start date"],
+  "Fire Eng":["NFPA 855 / UL 9540A experience","Hazard mitigation analysis (HMA) capability","AHJ / fire marshal coordination in Texas","Key personnel & availability","Fee basis / rate sheet","Insurance (PL / GL limits)","Schedule capacity & turnaround"],
+  "Owners Eng":["BESS OE portfolio (MW / MWh)","Scope coverage (design review, FAT, site QA)","Key personnel & availability","Independence / conflicts","Fee basis / rate sheet","Insurance (PL / GL limits)","Texas / ERCOT presence"],
+  "Eng of Record":["345 kV substation & collector design experience","Texas PE / firm registration","Design tools (PLS-CADD, ETAP, AutoCAD)","Key personnel & availability","Fee basis / rate sheet","Insurance (PL limit)","Schedule capacity & start date"],
+  "Independent Eng":["Lender acceptance / bankability record","BESS IE portfolio (MW / MWh)","Independence / conflicts","Key personnel & availability","Fee basis","Report turnaround","Insurance (PL / GL limits)"],
+  "BESS Equipment":["Lead time (weeks ARO)","FEOC compliance","Cell chemistry & cell / module origin","Certifications (UL 9540, UL 9540A, NFPA 855)","Warranty & performance guarantee","Domestic content (ITC adder)","Bankability / financial strength"],
+  "MV Transformers":["Lead time (weeks ARO)","FEOC compliance / country of origin","Ratings & standards (IEEE C57, DOE efficiency)","Production capacity / slot availability","Factory testing & witness (FAT)","Warranty","Domestic content"],
+  "HV Breakers":["Lead time (weeks ARO)","FEOC compliance / country of origin","Rating (362 kV class, interrupting kA)","Insulating gas (SF6 / SF6-free)","Utility / ERCOT references","Warranty","Texas field service support"],
+  "MV Breakers":["Lead time (weeks ARO)","FEOC compliance / country of origin","Rating (kV class, kA, IEEE C37)","Arc-resistant design","Warranty","Texas field service support"],
+  "EPC":["BESS & substation EPC experience (MW / MWh)","345 kV self-perform capability","Bonding capacity","Safety record (EMR, TRIR)","Financial strength","Texas labor availability","Risk appetite (LDs, wrap, insurance)"],
+  "Software":["ERCOT QSE / market integration","Cybersecurity (SOC 2, NERC CIP)","Hosting & data origin (FEOC)","Integration (SCADA, APIs)","Pricing model","Support / SLA","References"]
+};
+function slug(s){return s.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"").slice(0,40)}
+function defaultConfig(){
+  const keyItems={};
+  for(const t of TYPES){keyItems[t]=(DEFAULT_KEYS[t]||ENG_BASE).map(l=>({id:"k-"+slug(l),label:l}))}
+  return {keyItems, version:1};
+}
+
+// ---------- state ----------
+const S = {
+  config: defaultConfig(), configLoaded:false,
+  vendors: new Map(), loaded:false,
+  db:null, canWrite:true, downloads:null,
+  f:{type:"__all", rfi:"", qual:"", owner:"", q:"", overdue:false, stat:""},
+  openId:null, focusKey:null, pendingRender:false
+};
+try{const saved=JSON.parse(localStorage.getItem("rfi-filters")||"null"); if(saved&&typeof saved==="object") Object.assign(S.f,saved,{stat:""});}catch(e){}
+function saveFilters(){try{localStorage.setItem("rfi-filters",JSON.stringify(S.f))}catch(e){}}
+
+const $=(id)=>document.getElementById(id);
+const esc=(s)=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const today=()=>{const d=new Date();return new Date(d.getFullYear(),d.getMonth(),d.getDate())};
+const parseD=(s)=>{if(!s)return null;const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(s);return m?new Date(+m[1],+m[2]-1,+m[3]):null};
+const fmtD=(s)=>{const d=parseD(s);return d?d.toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric"}):""};
+const daysTo=(s)=>{const d=parseD(s);return d?Math.round((d-today())/864e5):null};
+function isOverdue(v){const n=daysTo(v.nextDate);return n!==null&&n<0&&!RFI_CLOSED.has(v.rfiStatus)}
+function isSoon(v){const n=daysTo(v.nextDate);return n!==null&&n>=0&&n<=7&&!RFI_CLOSED.has(v.rfiStatus)}
+function cls(list,val){const f=list.find(x=>x[0]===val);return f?f[1]:"s-neutral"}
+function keysFor(t){return (S.config.keyItems&&S.config.keyItems[t])||[]}
+function toast(msg){const t=$("toast");t.textContent=msg;t.hidden=false;clearTimeout(toast._t);toast._t=setTimeout(()=>t.hidden=true,2600)}
+function nowIso(){return new Date().toISOString()}
+
+// ---------- persistence ----------
+async function writeVendor(id, patch, isNew){
+  const v = Object.assign({}, S.vendors.get(id)||{}, patch, {updatedAt:nowIso()});
+  S.vendors.set(id, v);
+  if(!S.db){scheduleRender();return true}
+  try{
+    const ref=S.db.doc("vendors/"+id);
+    if(isNew) await ref.set(v); else await ref.update(Object.assign({},patch,{updatedAt:v.updatedAt}));
+    return true;
+  }catch(e){handleWriteError(e);return false}
+}
+async function writeConfig(){
+  S.config.updatedAt=nowIso();
+  if(!S.db){scheduleRender();return}
+  try{await S.db.doc("config/settings").set(JSON.parse(JSON.stringify(S.config)))}catch(e){handleWriteError(e)}
+}
+function handleWriteError(e){
+  const code=e&&e.code;
+  if(code==="invalid_argument"&&S.canWrite!==true){S.canWrite=false;showBanner("You have view-only access. Ask the owner for Contributor access to update the tracker.");render()}
+  else if(code==="quota_exceeded") toast("Storage is full. Remove unused vendors, then try again.");
+  else toast("Change not saved ("+(code||"error")+"). Try again.");
+}
+function showBanner(msg){const b=$("banner");b.textContent=msg;b.hidden=!msg}
+
+// ---------- filtering ----------
+function filtered(){
+  const f=S.f, q=f.q.trim().toLowerCase();
+  const out=[];
+  for(const v of S.vendors.values()){
+    if(f.type!=="__all"&&v.type!==f.type)continue;
+    if(f.rfi&&v.rfiStatus!==f.rfi)continue;
+    if(f.qual&&v.qual!==f.qual)continue;
+    if(f.owner&&(v.nextOwner||"")!==f.owner)continue;
+    if(f.overdue&&!isOverdue(v))continue;
+    if(f.stat==="__over"&&!isOverdue(v))continue;
+    if(f.stat==="__soon"&&!isSoon(v))continue;
+    if(q){const hay=[v.vendor,v.vid,v.contactName,v.contactEmail,v.nextAction,v.notes,v.services].join(" ").toLowerCase();if(!hay.includes(q))continue}
+    out.push(v);
+  }
+  out.sort((a,b)=>{
+    const ao=isOverdue(a)?0:1, bo=isOverdue(b)?0:1; if(ao!==bo)return ao-bo;
+    const ad=parseD(a.nextDate), bd=parseD(b.nextDate);
+    if(ad&&bd&&+ad!==+bd)return ad-bd; if(ad&&!bd)return -1; if(!ad&&bd)return 1;
+    const ti=TYPES.indexOf(a.type)-TYPES.indexOf(b.type); if(ti)return ti;
+    return String(a.vendor).localeCompare(String(b.vendor));
+  });
+  return out;
+}
+
+// ---------- render ----------
+function scheduleRender(){
+  const active=document.activeElement;
+  if(active&&$("grid").contains(active)&&active.tagName!=="BUTTON"){S.pendingRender=true;return}
+  render();
+}
+document.addEventListener("focusout",(e)=>{if(S.pendingRender&&$("grid").contains(e.target)){setTimeout(()=>{if(!$("grid").contains(document.activeElement)){S.pendingRender=false;render()}},0)}});
+
+function optionList(sel, items, value, allLabel){
+  sel.innerHTML=(allLabel!==undefined?`<option value="">${esc(allLabel)}</option>`:"")+items.map(([v,l])=>`<option value="${esc(v)}"${v===value?" selected":""}>${esc(l)}</option>`).join("");
+}
+function renderFilters(){
+  const counts={};for(const v of S.vendors.values())counts[v.type]=(counts[v.type]||0)+1;
+  const ft=$("fType");
+  ft.innerHTML=`<option value="__all">All vendor types (${S.vendors.size})</option>`+TYPES.map(t=>`<option value="${esc(t)}"${S.f.type===t?" selected":""}>${esc(TYPE_LABEL[t]||t)} (${counts[t]||0})</option>`).join("");
+  ft.value=S.f.type;
+  optionList($("fRfi"),RFI.map(r=>[r[0],r[0]]),S.f.rfi,"All");
+  optionList($("fQual"),QUAL.map(r=>[r[0],r[0]]),S.f.qual,"All");
+  const owners=new Set(OWNERS);for(const v of S.vendors.values())if(v.nextOwner)owners.add(v.nextOwner);
+  optionList($("fOwner"),[...owners].map(o=>[o,o]),S.f.owner,"Anyone");
+  $("fSearch").value=S.f.q; $("fOverdue").checked=S.f.overdue;
+  $("btnKeys").disabled=S.f.type==="__all";
+  $("btnKeys").title=S.f.type==="__all"?"Pick a vendor type to edit its key items":"Rename, add, reorder or remove key items for "+(TYPE_LABEL[S.f.type]||S.f.type);
+}
+function renderSummary(){
+  const scope=[...S.vendors.values()].filter(v=>S.f.type==="__all"||v.type===S.f.type);
+  const c={};for(const v of scope)c[v.rfiStatus]=(c[v.rfiStatus]||0)+1;
+  const over=scope.filter(isOverdue).length, soon=scope.filter(isSoon).length;
+  const tiles=RFI.filter(r=>c[r[0]]||["Not Sent","Sent","Response Received","Complete"].includes(r[0])).map(r=>
+    `<button type="button" class="stat${S.f.stat===r[0]?" on":""}" data-stat="${esc(r[0])}"><span class="n">${c[r[0]]||0}</span><span class="l">${esc(r[0])}</span></button>`).join("");
+  $("summary").innerHTML=tiles+`<span class="sep"></span>`+
+    `<button type="button" class="stat${over?" alert":""}${S.f.stat==="__over"?" on":""}" data-stat="__over"><span class="n">${over}</span><span class="l">Actions overdue</span></button>`+
+    `<button type="button" class="stat${soon?" soon":""}${S.f.stat==="__soon"?" on":""}" data-stat="__soon"><span class="n">${soon}</span><span class="l">Due in 7 days</span></button>`;
+}
+function contactHtml(v){
+  let h="";
+  if(v.contactName){h+=`<div class="nm">${esc(v.contactName)}</div>`;if(v.contactTitle)h+=`<div class="sub">${esc(v.contactTitle)}</div>`}
+  if(v.contactEmail)h+=`<div class="sub">${esc(v.contactEmail)}</div>`;
+  const ph=v.contactPhone||v.mainPhone; if(ph)h+=`<div class="sub">${esc(ph)}${!v.contactPhone?" (main)":""}</div>`;
+  if(!v.contactName&&!v.contactEmail){
+    const link=v.contactPage||v.website;
+    h+= link?`<div class="sub"><a href="${esc(link)}" target="_blank" rel="noopener">Contact page ↗</a></div>`:"";
+    h+=`<div class="unv">No named contact</div>`;
+  }
+  return h||`<span class="mono">—</span>`;
+}
+function kiCell(v,key){
+  const e=(v.ki||{})[key.id]||{}; const t=(e.v||"").trim();
+  return `<td class="kicell" data-open="${esc(v.id)}" data-key="${esc(key.id)}" title="Edit ${esc(key.label)}"><div class="v"><i class="dot ${esc(e.f||"")}"></i><span class="t${t?"":" empty"}">${t?esc(t):"—"}</span></div></td>`;
+}
+function kiSummary(v){
+  const keys=keysFor(v.type);const ki=v.ki||{};
+  let filled=0,risk=0,fail=0;const bars=keys.map(k=>{const e=ki[k.id]||{};const has=(e.v||"").trim()||e.f;if(has)filled++;if(e.f==="risk")risk++;if(e.f==="fail")fail++;return `<i class="${e.f||(has?"filled":"")}"></i>`}).join("");
+  const extra=[risk?`${risk} review`:"",fail?`${fail} fail`:""].filter(Boolean).join(", ");
+  return `<td class="kisum" data-open="${esc(v.id)}" style="cursor:pointer"><span class="bar">${bars}</span>${filled}/${keys.length}${extra?` · <span style="color:var(${fail?"--bad":"--warn"})">${extra}</span>`:""}</td>`;
+}
+function selectHtml(list,val,field,id){
+  const dis=S.canWrite===false?" disabled":"";
+  return `<select data-field="${field}" data-id="${esc(id)}" aria-label="${field}"${dis}>`+list.map(([o])=>`<option${o===val?" selected":""}>${esc(o)}</option>`).join("")+`</select>`;
+}
+function renderTable(){
+  const one=S.f.type!=="__all"; const keys=one?keysFor(S.f.type):[];
+  const rows=filtered();
+  $("count").textContent=`${rows.length} of ${S.vendors.size} vendors`;
+  $("legendHint").textContent=one?"Click a key item header to rename it.":"Pick a vendor type to see and edit its key item columns.";
+  const thead=$("thead");
+  const gh = `<tr class="g"><th class="sticky"></th><th colspan="4">Contact & RFI</th>`+(one?`<th class="grp" colspan="${keys.length+1}">Key items — ${esc(TYPE_LABEL[S.f.type]||S.f.type)}</th>`:`<th class="grp">Key items</th>`)+`<th colspan="3">Next action</th></tr>`;
+  const kh = one? keys.map(k=>`<th data-kh="${esc(k.id)}"><div class="ki-h"><span>${esc(k.label)}</span>${S.canWrite!==false?`<button type="button" class="ghost" data-rename="${esc(k.id)}" aria-label="Rename ${esc(k.label)}" title="Rename">✎</button>`:""}</div></th>`).join("")+(S.canWrite!==false?`<th><button type="button" class="ghost" id="addKeyInline" title="Add a key item to ${esc(S.f.type)}">+ Add</button></th>`:"<th></th>") : `<th>Rated / total</th>`;
+  thead.innerHTML = gh+`<tr class="h"><th class="sticky">Vendor</th><th>Contact</th><th>RFI status</th><th>Last contact</th><th>Qualification</th>${kh}<th>Next action</th><th>Owner</th><th>Due</th></tr>`;
+  const g=thead.querySelector("tr.g"); requestAnimationFrame(()=>{$("wrap").style.setProperty("--gh",(g?g.offsetHeight:0)+"px")});
+  const dis=S.canWrite===false?" disabled":"";
+  $("tbody").innerHTML = rows.map(v=>{
+    const n=daysTo(v.nextDate); const dueCls=isOverdue(v)?"over":isSoon(v)?"soon":"";
+    const dueTxt=v.nextDate?fmtD(v.nextDate)+(dueCls==="over"?` · ${-n}d late`:dueCls==="soon"?(n===0?" · today":` · ${n}d`):""):"—";
+    return `<tr>
+      <td class="sticky"><button type="button" class="vname" data-open="${esc(v.id)}">${esc(v.vendor||"(unnamed)")}</button><span class="mono">${esc(v.vid||"")}</span>${one?"":` <span class="typechip">${esc(v.type)}</span>`}</td>
+      <td class="contact">${contactHtml(v)}</td>
+      <td>${selectHtml(RFI,v.rfiStatus,"rfiStatus",v.id)}</td>
+      <td><input type="date" value="${esc(v.lastContact||"")}" data-field="lastContact" data-id="${esc(v.id)}" aria-label="Last contact date"${dis}></td>
+      <td>${selectHtml(QUAL,v.qual,"qual",v.id)}</td>
+      ${one?keys.map(k=>kiCell(v,k)).join("")+"<td></td>":kiSummary(v)}
+      <td class="next" data-open="${esc(v.id)}" data-focus="nextAction" style="cursor:pointer">${v.nextAction?esc(v.nextAction):'<span class="mono">—</span>'}</td>
+      <td style="white-space:nowrap">${esc(v.nextOwner||"—")}</td>
+      <td class="due ${dueCls}">${dueTxt}</td>
+    </tr>`}).join("");
+  const empty=$("empty");
+  if(!S.loaded&&S.db){empty.hidden=false;empty.innerHTML=`<h2>Loading vendors…</h2><p>Vendor RFI records appear here once the tracker connects.</p>`}
+  else if(S.vendors.size===0){empty.hidden=false;empty.innerHTML=`<h2>No vendors yet</h2><p>Use <b>+ Add vendor</b> to start tracking RFIs. Each vendor gets contact details, RFI status, the key items for its type, and a next action.</p>`}
+  else if(rows.length===0){empty.hidden=false;empty.innerHTML=`<h2>No vendors match these filters</h2><p>Clear a filter or the search box to see more.</p>`}
+  else empty.hidden=true;
+}
+function render(){renderFilters();renderSummary();renderTable();if(S.openId&&!$("drawer").hidden)refreshDrawerMeta()}
+
+// ---------- events: filters & grid ----------
+$("fType").addEventListener("change",e=>{S.f.type=e.target.value;saveFilters();render()});
+$("fRfi").addEventListener("change",e=>{S.f.rfi=e.target.value;S.f.stat="";saveFilters();render()});
+$("fQual").addEventListener("change",e=>{S.f.qual=e.target.value;saveFilters();render()});
+$("fOwner").addEventListener("change",e=>{S.f.owner=e.target.value;saveFilters();render()});
+$("fSearch").addEventListener("input",e=>{S.f.q=e.target.value;saveFilters();renderTable()});
+$("fOverdue").addEventListener("change",e=>{S.f.overdue=e.target.checked;saveFilters();render()});
+$("summary").addEventListener("click",e=>{
+  const b=e.target.closest("[data-stat]");if(!b)return;const s=b.dataset.stat;
+  if(s.startsWith("__")){S.f.stat=S.f.stat===s?"":s;S.f.rfi=""}else{S.f.stat=S.f.stat===s?"":s;S.f.rfi=S.f.stat?s:""}
+  render();
+});
+$("grid").addEventListener("change",e=>{
+  const el=e.target;const f=el.dataset.field,id=el.dataset.id;if(!f||!id)return;
+  const patch={[f]:el.value};
+  if(f==="rfiStatus"&&el.value==="Sent"&&!S.vendors.get(id).rfiSentDate)patch.rfiSentDate=new Date().toISOString().slice(0,10);
+  writeVendor(id,patch).then(ok=>ok&&toast("Saved"));
+});
+$("grid").addEventListener("click",e=>{
+  const rn=e.target.closest("[data-rename]");
+  if(rn){e.stopPropagation();startRename(rn.dataset.rename);return}
+  if(e.target.closest("#addKeyInline")){openKeyPanel(true);return}
+  if(e.target.closest("select,input,a"))return;
+  const o=e.target.closest("[data-open]");
+  if(o)openDrawer(o.dataset.open,o.dataset.key||o.dataset.focus||null);
+});
+function startRename(keyId){
+  const th=$("thead").querySelector(`[data-kh="${CSS.escape(keyId)}"] .ki-h`);if(!th)return;
+  const key=keysFor(S.f.type).find(k=>k.id===keyId);if(!key)return;
+  th.innerHTML=`<input type="text" id="rn-${esc(keyId)}" value="${esc(key.label)}" aria-label="Key item name">`;
+  const inp=th.querySelector("input");inp.focus();inp.select();
+  let done=false;
+  const commit=(save)=>{if(done)return;done=true;const val=inp.value.trim();
+    if(save&&val&&val!==key.label){key.label=val;writeConfig().then(()=>toast("Key item renamed"))}
+    S.pendingRender=false;render()};
+  inp.addEventListener("keydown",ev=>{if(ev.key==="Enter")commit(true);if(ev.key==="Escape")commit(false)});
+  inp.addEventListener("blur",()=>commit(true));
+}
+
+// ---------- drawer: vendor editor ----------
+function openScrim(){$("scrim").hidden=false}
+function closeAll(){$("drawer").hidden=true;$("keyPanel").hidden=true;$("scrim").hidden=true;S.openId=null}
+$("scrim").addEventListener("click",closeAll);
+document.addEventListener("keydown",e=>{if(e.key==="Escape"&&!$("scrim").hidden&&!(e.target.closest&&e.target.closest("[id^=rn-]")))closeAll()});
+
+function field(label,name,val,type="text",cls=""){
+  const dis=S.canWrite===false?" disabled":"";
+  return `<label class="field ${cls}"><span>${esc(label)}</span><input type="${type}" id="d-${name}" data-df="${name}" value="${esc(val||"")}"${dis}></label>`;
+}
+function selField(label,name,list,val,cls=""){
+  const dis=S.canWrite===false?" disabled":"";
+  return `<label class="field ${cls}"><span>${esc(label)}</span><select id="d-${name}" data-df="${name}"${dis}>${list.map(([o])=>`<option${o===val?" selected":""}>${esc(o)}</option>`).join("")}</select></label>`;
+}
+function openDrawer(id,focusKey){
+  const v=S.vendors.get(id);if(!v)return;
+  S.openId=id;$("keyPanel").hidden=true;
+  const dis=S.canWrite===false?" disabled":"";
+  const keys=keysFor(v.type);const ki=v.ki||{};
+  const owners=new Set(OWNERS);for(const x of S.vendors.values())if(x.nextOwner)owners.add(x.nextOwner);
+  $("drawer").innerHTML=`
+    <div class="dhead"><div><h2 id="dTitle">${esc(v.vendor||"New vendor")}</h2><div class="mono">${esc(v.vid||"")} · ${esc(TYPE_LABEL[v.type]||v.type)}</div></div><button type="button" class="ghost" id="dClose" aria-label="Close">✕</button></div>
+    <div class="dbody">
+      <section class="dsec"><h3>Next action</h3><div class="fgrid">
+        ${field("Next action","nextAction",v.nextAction,"text","full")}
+        <label class="field"><span>Owner</span><input type="text" id="d-nextOwner" data-df="nextOwner" list="ownerList" value="${esc(v.nextOwner||"")}"${dis}></label>
+        ${field("Due date","nextDate",v.nextDate,"date")}
+      </div><datalist id="ownerList">${[...owners].map(o=>`<option value="${esc(o)}">`).join("")}</datalist></section>
+      <section class="dsec"><h3>RFI & qualification</h3><div class="fgrid">
+        ${selField("RFI status","rfiStatus",RFI,v.rfiStatus)}
+        ${selField("Qualification status","qual",QUAL,v.qual)}
+        ${field("RFI sent","rfiSentDate",v.rfiSentDate,"date")}
+        ${field("Response due","rfiDueDate",v.rfiDueDate,"date")}
+        ${field("Last contact","lastContact",v.lastContact,"date")}
+      </div></section>
+      <section class="dsec"><h3><span>Key items — ${esc(TYPE_LABEL[v.type]||v.type)}</span>${S.canWrite!==false?`<button type="button" class="ghost" id="dKeys">Edit key items</button>`:""}</h3>
+        <div id="dKi">${keys.length?keys.map(k=>{const e=ki[k.id]||{};return `<div class="kirow${focusKey===k.id?" hi":""}" data-kid="${esc(k.id)}">
+          <div class="lbl">${esc(k.label)}</div>
+          <textarea rows="1" id="ki-${esc(k.id)}" data-ki="${esc(k.id)}" placeholder="Vendor response / notes"${dis}>${esc(e.v||"")}</textarea>
+          <select id="kf-${esc(k.id)}" data-kf="${esc(k.id)}" aria-label="Rating for ${esc(k.label)}"${dis}>${FLAGS.map(([fv,fl])=>`<option value="${fv}"${(e.f||"")===fv?" selected":""}>${fl}</option>`).join("")}</select>
+        </div>`}).join(""):`<p class="hint">No key items defined for this vendor type yet.</p>`}</div>
+      </section>
+      <section class="dsec"><h3>Contact</h3><div class="fgrid">
+        ${field("Contact name","contactName",v.contactName)}
+        ${field("Title","contactTitle",v.contactTitle)}
+        ${field("Email","contactEmail",v.contactEmail,"email")}
+        ${field("Direct phone","contactPhone",v.contactPhone,"tel")}
+        ${field("Main phone","mainPhone",v.mainPhone,"tel")}
+        ${field("Website","website",v.website,"url")}
+        ${field("Contact page","contactPage",v.contactPage,"url","full")}
+      </div></section>
+      <section class="dsec"><h3>Vendor</h3><div class="fgrid">
+        ${field("Vendor name","vendor",v.vendor,"text","full")}
+        ${field("Vendor ID","vid",v.vid)}
+        ${selField("Vendor type","type",TYPES.map(t=>[t]),v.type)}
+        <label class="field full"><span>Services / product line</span><textarea id="d-services" data-df="services" rows="2"${dis}>${esc(v.services||"")}</textarea></label>
+        <label class="field full"><span>Notes</span><textarea id="d-notes" data-df="notes" rows="3"${dis}>${esc(v.notes||"")}</textarea></label>
+      </div></section>
+      ${v.src?`<div class="src">${esc(v.src)}</div>`:""}
+    </div>
+    <div class="dfoot"><span class="saved" id="dSaved"></span><span id="dDel">${S.canWrite!==false?`<button type="button" class="ghost danger" id="dDelete">Remove vendor</button>`:""}</span></div>`;
+  $("drawer").hidden=false;openScrim();refreshDrawerMeta();
+  const fk=focusKey&&($("ki-"+focusKey)||$("d-"+focusKey));
+  (fk||$("dClose")).focus();
+  if(fk&&fk.scrollIntoView)fk.scrollIntoView({block:"center"});
+}
+function refreshDrawerMeta(){
+  const v=S.vendors.get(S.openId);const el=$("dSaved");if(!v||!el)return;
+  el.textContent=v.updatedAt?"Last updated "+new Date(v.updatedAt).toLocaleString(undefined,{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}):"";
+}
+$("drawer").addEventListener("click",e=>{
+  const id=S.openId;
+  if(e.target.closest("#dClose")){closeAll();return}
+  if(e.target.closest("#dKeys")){const v=S.vendors.get(id);if(v){S.f.type=v.type;saveFilters();render();openKeyPanel(false)}return}
+  if(e.target.closest("#dDelete")){$("dDel").innerHTML=`<span class="confirm">Remove permanently? <button type="button" class="danger" id="dDelYes">Remove</button><button type="button" id="dDelNo">Keep</button></span>`;return}
+  if(e.target.closest("#dDelNo")){$("dDel").innerHTML=`<button type="button" class="ghost danger" id="dDelete">Remove vendor</button>`;return}
+  if(e.target.closest("#dDelYes")){
+    const v=S.vendors.get(id);S.vendors.delete(id);closeAll();render();
+    if(S.db)S.db.doc("vendors/"+id).delete().then(()=>toast(`Removed ${v?v.vendor:"vendor"}`)).catch(handleWriteError);
+  }
+});
+$("drawer").addEventListener("change",e=>{
+  const el=e.target,id=S.openId;if(!id)return;const v=S.vendors.get(id);if(!v)return;
+  if(el.dataset.df){
+    const f=el.dataset.df,val=el.value;const patch={[f]:val};
+    if(f==="rfiStatus"&&val==="Sent"&&!v.rfiSentDate){patch.rfiSentDate=new Date().toISOString().slice(0,10);const d=$("d-rfiSentDate");if(d)d.value=patch.rfiSentDate}
+    writeVendor(id,patch).then(ok=>{if(ok){refreshDrawerMeta();if(f==="vendor")$("dTitle").textContent=val;if(f==="type")openDrawer(id)}});
+    return;
+  }
+  const kid=el.dataset.ki||el.dataset.kf;if(!kid)return;
+  const ki=JSON.parse(JSON.stringify(v.ki||{}));const cur=ki[kid]||{};
+  if(el.dataset.ki)cur.v=el.value;else cur.f=el.value;
+  ki[kid]=cur;
+  writeVendor(id,{ki}).then(ok=>ok&&refreshDrawerMeta());
+});
+$("drawer").addEventListener("input",e=>{if(e.target.tagName==="TEXTAREA"){e.target.style.height="auto";e.target.style.height=Math.min(e.target.scrollHeight,220)+"px"}});
+
+// ---------- add vendor ----------
+$("btnAdd").addEventListener("click",async()=>{
+  if(S.canWrite===false){toast("View-only access");return}
+  const type=S.f.type!=="__all"?S.f.type:TYPES[0];
+  const id="v-"+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+  const v={id,vid:"",vendor:"New vendor",type,rfiStatus:"Not Sent",qual:"Discovery",ki:{},nextAction:"Identify RFI contact",nextOwner:"Jason Knedlhans",createdAt:nowIso()};
+  await writeVendor(id,v,true);render();openDrawer(id,"vendor");
+  const n=$("d-vendor");if(n){n.focus();n.select()}
+});
+
+// ---------- key item manager ----------
+function openKeyPanel(addNew){
+  if(S.f.type==="__all"){toast("Pick a vendor type first");return}
+  S.openId=null;$("drawer").hidden=true;
+  const t=S.f.type;const keys=keysFor(t);
+  const inUse=(kid)=>{let n=0;for(const v of S.vendors.values())if(v.type===t){const e=(v.ki||{})[kid];if(e&&((e.v||"").trim()||e.f))n++}return n};
+  $("keyPanel").innerHTML=`
+    <div class="dhead"><div><h2>Key items</h2><div class="mono">${esc(TYPE_LABEL[t]||t)} · ${keys.length} items</div></div><button type="button" class="ghost" id="kClose" aria-label="Close">✕</button></div>
+    <div class="dbody">
+      <p class="hint">These are the column headers for ${esc(TYPE_LABEL[t]||t)}. Rename one by editing its name; changes save when you leave the field. Aim for 5–7 items so the tracker stays scannable.</p>
+      <div class="kmlist" id="kmList">${keys.map((k,i)=>{const used=inUse(k.id);return `<div class="kmitem" data-kid="${esc(k.id)}">
+        <span class="num">${i+1}</span>
+        <input type="text" id="km-${esc(k.id)}" value="${esc(k.label)}" aria-label="Key item ${i+1} name">
+        <button type="button" class="ghost" data-up="${esc(k.id)}" aria-label="Move up"${i===0?" disabled":""}>↑</button>
+        <button type="button" class="ghost" data-down="${esc(k.id)}" aria-label="Move down"${i===keys.length-1?" disabled":""}>↓</button>
+        <button type="button" class="ghost danger" data-del="${esc(k.id)}" title="${used?`Has entries for ${used} vendor(s)`:"Remove"}" aria-label="Remove">✕</button>
+      </div>`}).join("")}</div>
+      <section class="dsec"><h3>Add a key item</h3>
+        <div style="display:flex;gap:8px;flex-wrap:wrap"><input type="text" id="kmNew" placeholder="e.g. Payment terms" style="flex:1 1 200px">
+        <label class="chk" style="margin-top:0"><input type="checkbox" id="kmAll"> Add to all vendor types</label>
+        <button type="button" class="primary" id="kmAdd">Add</button></div>
+      </section>
+      <p class="hint">Removing a key item hides its column. Vendor responses already entered for it are kept, and come back if you add an item with the same name to this type.</p>
+    </div>`;
+  $("keyPanel").hidden=false;openScrim();
+  if(addNew)$("kmNew").focus();
+}
+$("keyPanel").addEventListener("click",e=>{
+  const t=S.f.type;const keys=keysFor(t);
+  if(e.target.closest("#kClose")){closeAll();return}
+  const up=e.target.closest("[data-up]"),dn=e.target.closest("[data-down]"),del=e.target.closest("[data-del]");
+  if(up||dn){const id=(up||dn).dataset[up?"up":"down"];const i=keys.findIndex(k=>k.id===id);const j=up?i-1:i+1;if(i<0||j<0||j>=keys.length)return;[keys[i],keys[j]]=[keys[j],keys[i]];writeConfig();render();openKeyPanel(false);return}
+  if(del){
+    const id=del.dataset.del;const row=del.closest(".kmitem");
+    if(!row.querySelector(".confirm")){const c=document.createElement("span");c.className="confirm";c.style.gridColumn="1/-1";c.innerHTML=`Remove this column? <button type="button" class="danger" data-delyes="${esc(id)}">Remove</button><button type="button" data-delno>Keep</button>`;row.appendChild(c)}
+    return}
+  const yes=e.target.closest("[data-delyes]");
+  if(yes){const id=yes.dataset.delyes;S.config.keyItems[t]=keys.filter(k=>k.id!==id);writeConfig().then(()=>toast("Key item removed"));render();openKeyPanel(false);return}
+  if(e.target.closest("[data-delno]")){e.target.closest(".confirm").remove();return}
+  if(e.target.closest("#kmAdd"))addKey();
+});
+$("keyPanel").addEventListener("keydown",e=>{if(e.target.id==="kmNew"&&e.key==="Enter")addKey()});
+$("keyPanel").addEventListener("change",e=>{
+  const row=e.target.closest(".kmitem");if(!row||e.target.tagName!=="INPUT")return;
+  const key=keysFor(S.f.type).find(k=>k.id===row.dataset.kid);const val=e.target.value.trim();
+  if(key&&val&&val!==key.label){key.label=val;writeConfig().then(()=>toast("Key item renamed"));render()}
+});
+function addKey(){
+  const inp=$("kmNew");const label=inp.value.trim();if(!label){inp.focus();return}
+  const all=$("kmAll").checked;const id="k-"+slug(label);
+  const targets=all?TYPES:[S.f.type];let added=0;
+  for(const t of targets){const arr=S.config.keyItems[t]=S.config.keyItems[t]||[];if(!arr.some(k=>k.id===id||k.label.toLowerCase()===label.toLowerCase())){arr.push({id,label});added++}}
+  if(!added){toast("That key item already exists");return}
+  writeConfig().then(()=>toast(all?`Added to ${added} vendor types`:"Key item added"));render();openKeyPanel(false);
+  const n=keysFor(S.f.type).length; if(n>7)toast(`${n} key items on this type. Consider keeping it to 7 or fewer.`);
+}
+$("btnKeys").addEventListener("click",()=>openKeyPanel(false));
+
+// ---------- export ----------
+$("btnExport").addEventListener("click",async()=>{
+  const rows=filtered();const one=S.f.type!=="__all";
+  const base=["Vendor ID","Vendor","Vendor type","Contact name","Contact title","Contact email","Contact phone","Main phone","RFI status","RFI sent","RFI response due","Last contact","Qualification status"];
+  const tail=["Next action","Next action owner","Next action due","Overdue","Notes","Last updated"];
+  let keyCols=[];
+  if(one)keyCols=keysFor(S.f.type).flatMap(k=>[k.label,k.label+" — rating"]);
+  else{const maxN=Math.max(0,...TYPES.map(t=>keysFor(t).length));for(let i=1;i<=maxN;i++)keyCols.push(`Key item ${i}`,`Key item ${i} response`,`Key item ${i} rating`)}
+  const flagName=(f)=>(FLAGS.find(x=>x[0]===(f||""))||FLAGS[0])[1];
+  const aoa=[base.concat(keyCols,tail)];
+  for(const v of rows){
+    const r=[v.vid,v.vendor,TYPE_LABEL[v.type]||v.type,v.contactName,v.contactTitle,v.contactEmail,v.contactPhone,v.mainPhone,v.rfiStatus,v.rfiSentDate,v.rfiDueDate,v.lastContact,v.qual];
+    const keys=keysFor(v.type);const ki=v.ki||{};
+    if(one)for(const k of keys){const e=ki[k.id]||{};r.push(e.v||"",flagName(e.f))}
+    else{const maxN=keyCols.length/3;for(let i=0;i<maxN;i++){const k=keys[i];if(!k){r.push("","","");continue}const e=ki[k.id]||{};r.push(k.label,e.v||"",flagName(e.f))}}
+    r.push(v.nextAction,v.nextOwner,v.nextDate,isOverdue(v)?"Yes":"",v.notes,v.updatedAt?v.updatedAt.slice(0,10):"");
+    aoa.push(r.map(x=>x==null?"":x));
+  }
+  const date=new Date().toISOString().slice(0,10);
+  const name=`${date}_rfi-tracker_${one?slug(S.f.type):"all"}_export`;
+  let data,filename;
+  if(window.XLSX){
+    const ws=XLSX.utils.aoa_to_sheet(aoa);ws["!cols"]=aoa[0].map(h=>({wch:Math.min(Math.max(String(h).length+2,12),40)}));ws["!autofilter"]={ref:ws["!ref"]};
+    const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"RFI Tracker");
+    const meta=[["RFI Tracker export"],["Exported",new Date().toLocaleString()],["Filter",one?(TYPE_LABEL[S.f.type]||S.f.type):"All vendor types"],["Rows",rows.length],["Classification","Internal — do not share vendor data outside Agentic"]];
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(meta),"About");
+    data=XLSX.write(wb,{bookType:"xlsx",type:"array"});filename=name+".xlsx";
+  }else{
+    data=aoa.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(",")).join("\r\n");filename=name+".csv";
+  }
+  if(!S.downloads){toast("Download isn't available in this view");return}
+  try{await S.downloads.save({filename,data});toast("Export ready: "+filename)}
+  catch(e){if(e&&e.code==="declined")return;toast("Export failed ("+((e&&e.code)||"error")+")")}
+});
+
+// ---------- boot ----------
+render();
+(async function boot(){
+  const cl=window.claude;
+  if(!cl||!cl.use){showBanner("Saving isn't available here. Open this tracker from its claude.ai link to keep changes.");S.loaded=true;render();return}
+  const [db,user,dl]=await Promise.all([cl.use("db"),cl.use("user"),cl.use("downloads")]);
+  S.downloads=dl;
+  if(!db){showBanner("Shared data isn't available in this view (sign in to claude.ai). Changes here won't be kept.");S.loaded=true;render();return}
+  S.db=db;
+  if(user){try{const w=await user.can("data.write");S.canWrite=w;if(w===false)showBanner("You have view-only access. Ask the owner for Contributor access to update the tracker.")}catch(e){}}
+  db.doc("config/settings").onSnapshot(snap=>{
+    if(snap.exists){const d=snap.data();const c=JSON.parse(JSON.stringify(d));c.keyItems=Object.assign(defaultConfig().keyItems,c.keyItems||{});S.config=c}
+    S.configLoaded=true;scheduleRender();
+  },err=>showBanner("Lost connection to key item settings ("+err.code+"). Reload the page."));
+  db.collection("vendors").onSnapshot(snap=>{
+    const m=new Map();for(const d of snap.docs){const x=Object.assign({},d.data());x.id=d.id;m.set(d.id,x)}
+    S.vendors=m;S.loaded=true;
+    if(S.openId&&!m.has(S.openId))closeAll();
+    scheduleRender();
+  },err=>showBanner("Lost connection to vendor data ("+err.code+"). Reload the page."));
+})();
+})();
+</script>
